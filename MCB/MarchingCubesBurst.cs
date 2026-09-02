@@ -217,10 +217,10 @@ public class MarchingCubesBurst {
 		Clean();
 
 		// Assign new grid properties
-		this.gridSize = newGridSize;
-		this.originGrid = newOrigin;
-		this.dx = newDx;
-		this.totalSize = newGridSize.x * newGridSize.y * newGridSize.z;
+		gridSize = newGridSize;
+		originGrid = newOrigin;
+		dx = newDx;
+		totalSize = newGridSize.x * newGridSize.y * newGridSize.z;
 
 		// Refresh density NativeArray
 		if (!values.IsCreated || values.Length != totalSize)
