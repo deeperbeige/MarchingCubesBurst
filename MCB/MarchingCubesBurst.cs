@@ -48,6 +48,8 @@ public class MarchingCubesBurst {
 	}
 
 	void initTriTable() {
+		if (nbTriTable.IsCreated && triTable.IsCreated) return;
+			
 		nbTriTable = new NativeArray<int>(256, Allocator.Persistent);
 		triTable = new NativeArray<int>(4096, Allocator.Persistent);
 		int id = 0;
@@ -61,7 +63,7 @@ public class MarchingCubesBurst {
 		}
 	}
 
-	public void computeIsoSurface(float isoValue) {
+	public void computeIsoSurface(float isoValue, bool generateOuterHull = true, bool generateInnerHull = true) {
 
 		if (curVertices.IsCreated)
 			curVertices.Dispose();
@@ -113,15 +115,19 @@ public class MarchingCubesBurst {
 
 		if (totalVerts <= 0) {
 			Debug.LogWarning("Empty iso-surface");
+			vertPerCellIn.Dispose();
 			vertPerCell.Dispose();
 			compactedVoxel.Dispose();
 			return;
 		}
 
+		int mult = 0;
+		if (generateOuterHull) mult++;
+		if (generateInnerHull) mult++;
+
 		curVertices = new NativeArray<float3>((int)totalVerts, Allocator.Persistent);
 		curNormals = new NativeArray<float3>((int)totalVerts, Allocator.Persistent);
-		//Double the triangles to have both faces
-		curTriangles = new NativeArray<int>((int)totalVerts * 2, Allocator.Persistent);
+		curTriangles = new NativeArray<int>((int)totalVerts * mult, Allocator.Persistent);
 
 		//compactvoxels
 
@@ -166,17 +172,22 @@ public class MarchingCubesBurst {
 		var NormJobHandle = NormJob.Schedule((int)totalVerts, 128);
 		NormJobHandle.Complete();
 
+		int triOffset = 0;
 
-		for (int i = 0; i < totalVerts - 3; i += 3) {
-			curTriangles[i] = i;
-			curTriangles[i + 1] = i + 1;
-			curTriangles[i + 2] = i + 2;
+		if (generateOuterHull) {
+			for (int i = 0; i < totalVerts; i += 3) {
+				curTriangles[triOffset++] = i;
+				curTriangles[triOffset++] = i + 1;
+				curTriangles[triOffset++] = i + 2;
+			}
 		}
-		//Double the triangles to have both faces
-		for (int i = (int)totalVerts; i < totalVerts * 2 - 3; i += 3) {
-			curTriangles[i] = i - (int)totalVerts;
-			curTriangles[i + 2] = i + 1 - (int)totalVerts; //Invert triangles here
-			curTriangles[i + 1] = i + 2 - (int)totalVerts;
+
+		if (generateInnerHull) {
+			for (int i = 0; i < totalVerts; i += 3) {
+				curTriangles[triOffset++] = i;
+				curTriangles[triOffset++] = i + 2; //Invert triangles here
+				curTriangles[triOffset++] = i + 1;
+			}
 		}
 
 		vertPerCellIn.Dispose();
@@ -200,20 +211,52 @@ public class MarchingCubesBurst {
 		return res;
 	}
 
+	public void Reuse(float[] newDensityBuffer, int3 newGridSize, Vector3 newOrigin, float newDx)
+	{
+		// Clean up previous frame/cluster's temporary buffers if still active
+		Clean();
+
+		// Assign new grid properties
+		this.gridSize = newGridSize;
+		this.originGrid = newOrigin;
+		this.dx = newDx;
+		this.totalSize = newGridSize.x * newGridSize.y * newGridSize.z;
+
+		// Refresh density NativeArray
+		if (!values.IsCreated || values.Length != totalSize)
+		{
+			if (values.IsCreated) values.Dispose();
+			values = new NativeArray<float>(totalSize, Allocator.Persistent);
+		}
+    
+		values.CopyFrom(newDensityBuffer);
+    
+		// Ensure lookup tables are initialized once
+		initTriTable();
+	}
+
 	public void Clean() {
 
 		if (values.IsCreated)
 			values.Dispose();
-		if (nbTriTable.IsCreated)
-			nbTriTable.Dispose();
-		if (triTable.IsCreated)
-			triTable.Dispose();
 		if (curVertices.IsCreated)
 			curVertices.Dispose();
 		if (curNormals.IsCreated)
 			curNormals.Dispose();
 		if (curTriangles.IsCreated)
 			curTriangles.Dispose();
+	}
+
+	// Call this manually when you no longer need to use MCB
+	// For example, from a MonoBehaviour's OnDestroy
+	public void Destroy() {
+
+		Clean();
+
+		if (nbTriTable.IsCreated)
+			nbTriTable.Dispose();
+		if (triTable.IsCreated)
+			triTable.Dispose();
 	}
 
 
@@ -431,7 +474,7 @@ public class MarchingCubesBurst {
 			for (int i = 0; i < numVerts; i += 3) {
 
 				int id = (int)vertPerCell[(int)voxel].x + i;
-				if (id >= totalVerts - 3)
+				if (id >= totalVerts)
 					return;
 				int edge = triTable[i + cubeIndex * 16]; // ==> triTable[cubeIndex][i]
 
